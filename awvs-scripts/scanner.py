@@ -42,10 +42,7 @@ from check_ssh_root import check_ssh_root
 from check_account_lock_threshold import check_account_lock_threshold
 from check_sensitive_files import check_sensitive_files
 from check_crontab import check_crontab
-# 팀원 모듈 추가 시 여기에 import
-# from check_ssh_root import check_ssh_root
-# from check_sudoers import check_sudoers
-# from check_directory_listing import check_directory_listing
+from check_sudoers import check_sudoers
 
 
 # ── 설정 ──────────────────────────────────────────────────
@@ -74,10 +71,7 @@ def run_all_modules(web_root="/var/www/html"):
         ("A07-01", "계정 잠금 임계값 설정", lambda: check_account_lock_threshold()),
         ("A05-05", "민감 파일 노출 점검", lambda: check_sensitive_files(web_root)),
         ("A01-03", "crontab 악성 스케줄 점검", lambda: check_crontab()),
-
-        # ── 팀원 모듈 추가 ──
-        # ("A01-01", "root 계정 원격 접속 제한", lambda: check_ssh_root()),
-        # ("A01-02", "sudoers 설정 점검", lambda: check_sudoers()),
+        ("A05-06", "sudo 권한 과다 부여", lambda: check_sudoers()),
     ]
 
     results = []
