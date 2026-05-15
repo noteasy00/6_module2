@@ -44,6 +44,7 @@ from check_sensitive_files import check_sensitive_files
 from check_crontab import check_crontab
 from check_sudoers import check_sudoers
 from check_ssh_backdoor_keys import check_ssh_backdoor_keys
+from check_login_anomaly import check_login_anomaly
 
 
 # ── 설정 ──────────────────────────────────────────────────
@@ -74,6 +75,7 @@ def run_all_modules(web_root="/var/www/html"):
         ("A01-03", "crontab 악성 스케줄 점검", lambda: check_crontab()),
         ("A05-06", "sudo 권한 과다 부여", lambda: check_sudoers()),
         ("A08-01", "SSH 백도어 의심 키 탐지", lambda: check_ssh_backdoor_keys()),
+        ("A07-02", "비정상 로그인 및 SSH 접근 탐지", lambda: check_login_anomaly()),
     ]
 
     results = []

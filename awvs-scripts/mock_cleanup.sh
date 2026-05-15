@@ -13,6 +13,11 @@ sed -i 's/^PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd
 # 2. SSH 백도어 키 제거
 echo "[2/11] SSH 백도어 키 제거"
 sed -i '/attacker@evil-server/d' /root/.ssh/authorized_keys 2>/dev/null
+# mock_setup이 생성한 파일이 비어있으면 제거 (빈 파일 = 모듈에서 취약 판정)
+if [ -f /root/.ssh/authorized_keys ] && [ ! -s /root/.ssh/authorized_keys ]; then
+  rm -f /root/.ssh/authorized_keys
+  echo "  authorized_keys 빈 파일 제거 완료"
+fi
 
 # 3. 계정 잠금 - 클린업 불필요 (기본 상태 유지)
 echo "[3/11] 계정 잠금 - 변경 없음"
@@ -63,11 +68,16 @@ rm -rf /var/www/html/.git
 # 11. crontab 악성 스케줄 제거
 echo "[11/11] crontab 악성 스케줄 제거"
 sed -i '/AWVS-MOCK-CRON/d' /etc/crontab
+# 203.0.113.99 관련 잔여 라인도 제거 (중복 실행 대비)
+sed -i '/203\.0\.113\.99/d' /etc/crontab
+# 사용자 crontab 테스트 파일 제거
+rm -f /var/spool/cron/crontabs/suspicious
 
 echo ""
 echo "=== 클린업 완료 (11개 항목) ==="
 echo "확인:"
 grep PermitRootLogin /etc/ssh/sshd_config | head -1
+ls /root/.ssh/authorized_keys 2>/dev/null || echo "  authorized_keys 파일 없음 (정상)"
 ls /var/www/html/uploads/ 2>/dev/null || echo "  uploads/ 비어있음"
 ls /etc/sudoers.d/99-vulnerable 2>/dev/null || echo "  sudoers 취약 설정 없음"
 ls /var/www/html/infected.html 2>/dev/null || echo "  악성 JS 샘플 없음"

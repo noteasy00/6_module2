@@ -75,6 +75,11 @@ def check_ssh_backdoor_keys():
         "no-pty"
     ]
 
+    # === AWS EC2 기본 root 키 화이트리스트 ===
+    aws_ec2_whitelist = [
+        "Please login as the user",
+    ]
+
     # === 키워드 기반 의심 ===
     suspicious_patterns = [
         r"\btest\b",
@@ -109,6 +114,15 @@ def check_ssh_backdoor_keys():
 
             options, key_type, key, comment = parsed
             valid_keys.append(line)
+
+            # === AWS EC2 기본 키 화이트리스트 체크 ===
+            is_whitelisted = False
+            for wl in aws_ec2_whitelist:
+                if wl in line:
+                    is_whitelisted = True
+                    break
+            if is_whitelisted:
+                continue
 
             full_text = " ".join(options + [comment]).lower()
 
