@@ -43,6 +43,7 @@ from check_account_lock_threshold import check_account_lock_threshold
 from check_sensitive_files import check_sensitive_files
 from check_crontab import check_crontab
 from check_sudoers import check_sudoers
+from check_ssh_backdoor_keys import check_ssh_backdoor_keys
 
 
 # ── 설정 ──────────────────────────────────────────────────
@@ -72,6 +73,7 @@ def run_all_modules(web_root="/var/www/html"):
         ("A05-05", "민감 파일 노출 점검", lambda: check_sensitive_files(web_root)),
         ("A01-03", "crontab 악성 스케줄 점검", lambda: check_crontab()),
         ("A05-06", "sudo 권한 과다 부여", lambda: check_sudoers()),
+        ("A08-01", "SSH 백도어 의심 키 탐지", lambda: check_ssh_backdoor_keys()),
     ]
 
     results = []
