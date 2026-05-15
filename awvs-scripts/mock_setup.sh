@@ -23,11 +23,18 @@ echo "[4/11] sudoers NOPASSWD 설정"
 echo "ubuntu ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/99-vulnerable
 chmod 440 /etc/sudoers.d/99-vulnerable
 
-# 5. auth.log - 가짜 로그인 실패 로그
-echo "[5/11] auth.log 가짜 실패 로그 삽입"
-for i in $(seq 1 10); do
-  echo "$(date '+%b %d %H:%M:%S') $(hostname) sshd[$$]: Failed password for root from 203.0.113.$i port 22 ssh2" >> /var/log/auth.log
+# 5. auth.log - 로그인 이상행위 탐지용 가짜 로그
+echo "[5/11] auth.log 이상행위 로그 삽입"
+# (a) 동일 IP에서 Failed password 7회 (탐지 기준: 5회 이상)
+for i in $(seq 1 7); do
+  echo "$(date '+%b %d %H:%M:%S') $(hostname) sshd[$$]: Failed password for root from 203.0.113.50 port 22 ssh2" >> /var/log/auth.log
 done
+# (b) 동일 IP에서 Invalid user 4회 (탐지 기준: 3회 이상)
+for user in ghost hacker test nobody; do
+  echo "$(date '+%b %d %H:%M:%S') $(hostname) sshd[$$]: Invalid user $user from 203.0.113.60 port 22" >> /var/log/auth.log
+done
+# (c) 심야 시간대(02:33) Accepted 로그인 (탐지 기준: 00:00~06:00)
+echo "$(date '+%b %d') 02:33:15 $(hostname) sshd[$$]: Accepted password for ubuntu from 203.0.113.70 port 22 ssh2" >> /var/log/auth.log
 
 # 6. 웹셸 샘플
 echo "[6/11] 웹셸 샘플 생성"
