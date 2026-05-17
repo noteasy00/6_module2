@@ -51,6 +51,72 @@ from check_login_anomaly import check_login_anomaly
 S3_BUCKET = "awvs-scan-results-team6-v2"
 S3_REGION = "ap-northeast-2"
 OPENAI_MODEL = "gpt-4o-mini"  # 비용 절감용, gpt-4o도 가능
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
+
+
+# ── 프롬프트 로딩 ────────────────────────────────────────
+def load_prompts():
+    """prompts/ 디렉토리에서 시스템 프롬프트, ATT&CK 매핑, Few-shot 예시를 로딩"""
+    with open(os.path.join(PROMPTS_DIR, "system_prompt.md"), "r", encoding="utf-8") as f:
+        system_prompt = f.read()
+    with open(os.path.join(PROMPTS_DIR, "attack_mapping.json"), "r", encoding="utf-8") as f:
+        attack_mapping = json.load(f)
+    with open(os.path.join(PROMPTS_DIR, "few_shot.json"), "r", encoding="utf-8") as f:
+        few_shots = json.load(f)
+    return system_prompt, attack_mapping, few_shots
+
+
+def build_user_prompt(result, attack_mapping, few_shots):
+    """점검 결과 + ATT&CK 매핑 + Few-shot 예시를 조합하여 user 프롬프트 생성"""
+    module_id = result["module"]
+
+    # ATT&CK 매핑 정보 삽입
+    mapping = attack_mapping.get(module_id, {})
+    attack_context = ""
+    if mapping:
+        attack_context = f"""
+[ATT&CK 매핑 참조]
+- Tactic: {mapping.get('tactic', '')}
+- Technique: {mapping.get('technique_id', '')} - {mapping.get('technique_name', '')}
+- 설명: {mapping.get('description', '')}
+"""
+        if mapping.get("related"):
+            attack_context += f"- 관련 기법: {', '.join(mapping['related'])}\n"
+
+    # Few-shot 예시 선택 (동일 모듈 우선, 없으면 같은 유형)
+    example_text = ""
+    matched = [fs for fs in few_shots if fs["module"] == module_id]
+    if not matched:
+        # 카테고리 기반 매칭 (웹 vs 시스템)
+        module_type = "web" if module_id.startswith("A03") or module_id.startswith("A05-04") or module_id.startswith("A05-05") else "system"
+        matched = [fs for fs in few_shots if fs["type"] == module_type]
+
+    if matched:
+        ex = matched[0]
+        example_text = f"""
+[응답 품질 예시]
+입력:
+- 항목: {ex['input']['title']}
+- 증거: {ex['input']['evidence'][:150]}
+
+기대 출력:
+{json.dumps(ex['output'], ensure_ascii=False, indent=2)}
+"""
+
+    # 실제 점검 결과
+    user_prompt = f"""{attack_context}
+{example_text}
+[실제 분석 대상]
+점검 항목: {result['title']}
+모듈 코드: {result['module']}
+상태: {result['status']}
+대상: {result.get('target', '')}
+증거: {result['evidence']}
+판단 근거: {result['reason']}
+
+위 점검 결과를 분석하여 JSON으로 응답하세요."""
+
+    return user_prompt
 
 
 def get_server_info():
@@ -101,8 +167,11 @@ def run_all_modules(web_root="/var/www/html"):
     return results
 
 
-def ai_analyze(result):
-    """OpenAI GPT API로 단일 점검 결과에 대한 AI 분석 수행"""
+def ai_analyze(result, system_prompt, attack_mapping, few_shots):
+    """
+    OpenAI GPT API로 단일 점검 결과에 대한 AI 분석 수행
+    prompts/ 디렉토리에서 로딩한 시스템 프롬프트, ATT&CK 매핑, Few-shot을 활용
+    """
     try:
         from openai import OpenAI
         client = OpenAI()  # OPENAI_API_KEY 환경변수 사용
@@ -113,48 +182,64 @@ def ai_analyze(result):
         print(f"      [!] OpenAI 클라이언트 초기화 실패: {e}")
         return result
 
-    # 양호/N/A인 경우 간단 분석
+    # 양호/N/A인 경우 간단 분석 (ATT&CK 매핑 정보는 포함)
     if result["status"] != "취약":
+        mapping = attack_mapping.get(result["module"], {})
         result["ai_analysis"] = {
             "risk_detail": "현재 안전한 상태입니다.",
             "attack_scenario": "해당 없음",
-            "countermeasure": result.get("recommendation", "-")
+            "countermeasure": result.get("recommendation", "-"),
+            "mitre_tactic": mapping.get("tactic", "-"),
+            "mitre_technique": f"{mapping.get('technique_id', '')} - {mapping.get('technique_name', '')}" if mapping else "-"
         }
         return result
 
-    prompt = f"""당신은 리눅스 서버 보안 전문가입니다. 아래 취약점 점검 결과를 분석하여 JSON으로 응답하세요.
-
-점검 항목: {result['title']}
-모듈 코드: {result['module']}
-상태: {result['status']}
-대상: {result.get('target', '')}
-증거: {result['evidence']}
-판단 근거: {result['reason']}
-
-다음 3개 필드를 한국어로 작성하세요:
-1. risk_detail: 이 취약점의 구체적 위험성 (2-3문장)
-2. attack_scenario: 실제 공격 시나리오 (단계별로 2-3문장)
-3. countermeasure: 구체적 대응 방안 (명령어 포함, 2-3문장)
-
-JSON 형식으로만 응답하세요:
-{{"risk_detail": "...", "attack_scenario": "...", "countermeasure": "..."}}"""
+    # 프롬프트 조립
+    user_prompt = build_user_prompt(result, attack_mapping, few_shots)
 
     try:
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
             temperature=0.3,
-            max_tokens=500,
+            max_tokens=700,
             response_format={"type": "json_object"}
         )
         ai_result = json.loads(response.choices[0].message.content)
+
+        # 필수 필드 검증 및 기본값 처리
+        required_fields = ["risk_detail", "attack_scenario", "countermeasure", "mitre_tactic", "mitre_technique"]
+        for field in required_fields:
+            if not ai_result.get(field):
+                mapping = attack_mapping.get(result["module"], {})
+                if field == "mitre_tactic":
+                    ai_result[field] = mapping.get("tactic", "Unknown")
+                elif field == "mitre_technique":
+                    ai_result[field] = f"{mapping.get('technique_id', '')} - {mapping.get('technique_name', '')}"
+                else:
+                    ai_result[field] = ""
+
         result["ai_analysis"] = {
             "risk_detail": ai_result.get("risk_detail", ""),
             "attack_scenario": ai_result.get("attack_scenario", ""),
-            "countermeasure": ai_result.get("countermeasure", "")
+            "countermeasure": ai_result.get("countermeasure", ""),
+            "mitre_tactic": ai_result.get("mitre_tactic", ""),
+            "mitre_technique": ai_result.get("mitre_technique", "")
         }
     except Exception as e:
         print(f"      [!] AI 분석 실패: {e}")
+        # 실패 시에도 ATT&CK 매핑 정보는 채워줌
+        mapping = attack_mapping.get(result["module"], {})
+        result["ai_analysis"] = {
+            "risk_detail": "",
+            "attack_scenario": "",
+            "countermeasure": "",
+            "mitre_tactic": mapping.get("tactic", ""),
+            "mitre_technique": f"{mapping.get('technique_id', '')} - {mapping.get('technique_name', '')}" if mapping else ""
+        }
 
     return result
 
@@ -216,11 +301,20 @@ def main():
 
     # 2. AI 분석
     if not args.no_ai:
-        print("\n[2/3] AI 분석 수행 (OpenAI GPT)")
-        for i, result in enumerate(results):
-            print(f"  [*] {result['module']} AI 분석 중...")
-            results[i] = ai_analyze(result)
-            print(f"      완료")
+        print("\n[2/3] AI 분석 수행 (OpenAI GPT + ATT&CK 매핑)")
+        try:
+            system_prompt, attack_mapping, few_shots = load_prompts()
+            print(f"      프롬프트 로딩 완료 (모듈 매핑 {len(attack_mapping)}건, Few-shot {len(few_shots)}건)")
+        except FileNotFoundError as e:
+            print(f"      [!] 프롬프트 파일 로딩 실패: {e}")
+            print("      [!] prompts/ 디렉토리를 확인하세요. AI 분석을 건너뜁니다.")
+            system_prompt, attack_mapping, few_shots = None, {}, []
+
+        if system_prompt:
+            for i, result in enumerate(results):
+                print(f"  [*] {result['module']} AI 분석 중...")
+                results[i] = ai_analyze(result, system_prompt, attack_mapping, few_shots)
+                print(f"      완료")
     else:
         print("\n[2/3] AI 분석 건너뜀 (--no-ai)")
 

