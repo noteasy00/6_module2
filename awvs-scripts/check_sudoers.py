@@ -9,7 +9,7 @@ from glob import glob
 
 def check_sudoers():
     result = {
-        "module": "A05-04",
+        "module": "A05-06",
         "ref": "U-63",
         "category": "시스템",
         "title": "sudo 권한 과다 부여",

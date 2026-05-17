@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 def check_login_anomaly():
     result = {
-        "module": "A07-02",
+        "module": "A09-01",
         "ref": "U-66",
         "category": "시스템",
         "title": "비정상 로그인 및 SSH 접근 탐지",

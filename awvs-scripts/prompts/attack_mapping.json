@@ -57,7 +57,7 @@
     "technique_name": "Account Manipulation: SSH Authorized Keys",
     "description": "authorized_keys에 공격자 키를 삽입하여 비밀번호 없이 지속적 접근을 유지하는 기법"
   },
-  "A07-02": {
+  "A09-01": {
     "tactic": "Credential Access",
     "technique_id": "T1110",
     "technique_name": "Brute Force",
