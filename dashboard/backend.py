@@ -9,15 +9,32 @@ Streamlit 대시보드에서 import해서 사용
     pip install boto3 requests
 """
 
+import os
 import json
 import boto3
 import requests
 from datetime import datetime
 
+
+# ── .env 파일 로딩 ────────────────────────────────────────
+def load_env(env_path=None):
+    """스크립트 폴더의 .env 파일에서 환경변수 로딩"""
+    if env_path is None:
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+load_env()
+
 # ── 설정 ──────────────────────────────────────────────────
-API_GATEWAY_URL = "https://rxb381zufb.execute-api.ap-northeast-2.amazonaws.com/prod/scan"
-S3_BUCKET = "awvs-scan-results-team6-v2"
-S3_REGION = "ap-northeast-2"
+API_GATEWAY_URL = os.environ.get("AWVS_API_GATEWAY_URL")
+S3_BUCKET = os.environ.get("AWVS_S3_BUCKET")
+S3_REGION = os.environ.get("AWVS_S3_REGION", "ap-northeast-2")
 S3_PREFIX = "results/"
 
 
