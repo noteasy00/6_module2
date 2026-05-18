@@ -45,6 +45,8 @@ from check_crontab import check_crontab
 from check_sudoers import check_sudoers
 from check_ssh_backdoor_keys import check_ssh_backdoor_keys
 from check_login_anomaly import check_login_anomaly
+# ── 엑셀 보고서 모듈 임포트 ──────────────────────────────────────
+from generate_report import generate_xlsx_report
 
 
 # ── 설정 ──────────────────────────────────────────────────
@@ -280,6 +282,7 @@ def main():
     parser = argparse.ArgumentParser(description="AWVS 통합 보안 스캐너")
     parser.add_argument("--no-ai", action="store_true", help="AI 분석 건너뛰기")
     parser.add_argument("--no-s3", action="store_true", help="S3 업로드 건너뛰기")
+    parser.add_argument("--no-report", action="store_true", help="엑셀 보고서 생성 건너뛰기")
     parser.add_argument("--web-root", default="/var/www/html", help="웹 루트 디렉토리")
     args = parser.parse_args()
 
@@ -340,7 +343,35 @@ def main():
     print(f"\n[3/3] 결과 저장")
     local_path = save_local(scan_data, filename)
 
-    # S3 업로드
+    # 엑셀 보고서 생성
+    if not args.no_report:
+        print("\n  [*] 엑셀 보고서 생성 중...")
+        try:
+            xlsx_path = generate_xlsx_report(scan_data)
+            print(f"  [+] 엑셀 보고서 생성 완료: {xlsx_path}")
+
+            # S3에 엑셀도 업로드
+            if not args.no_s3:
+                try:
+                    import boto3
+                    s3 = boto3.client("s3", region_name=S3_REGION)
+                    xlsx_filename = os.path.basename(xlsx_path)
+                    with open(xlsx_path, "rb") as f:
+                        s3.put_object(
+                            Bucket=S3_BUCKET,
+                            Key=f"reports/{xlsx_filename}",
+                            Body=f.read(),
+                            ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    print(f"  [+] 엑셀 S3 업로드 완료: s3://{S3_BUCKET}/reports/{xlsx_filename}")
+                except Exception as e:
+                    print(f"  [!] 엑셀 S3 업로드 실패: {e}")
+        except Exception as e:
+            print(f"  [!] 엑셀 보고서 생성 실패: {e}")
+    else:
+        print("  엑셀 보고서 생성 건너뜀 (--no-report)")
+
+    # S3 업로드 (JSON)
     if not args.no_s3:
         upload_to_s3(scan_data, filename)
     else:

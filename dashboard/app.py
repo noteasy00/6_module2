@@ -10,6 +10,8 @@ S3 스캔 결과를 읽어 시각화하고, API Gateway로 스캔을 트리거�
     pip install streamlit pandas boto3 requests
 """
 
+import sys
+import os
 import streamlit as st
 import pandas as pd
 from backend import (
@@ -20,6 +22,18 @@ from backend import (
     get_vuln_items,
     get_warn_items
 )
+
+# generate_report.py 경로 탐색 (Git 구조 + EC2 배포 구조 모두 지원)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+for _candidate in [
+    os.path.join(_script_dir, ".."),               # Git: dashboard/ → 프로젝트 루트
+    os.path.join(_script_dir, "..", "awvs-scripts"),  # Git: dashboard/ → awvs-scripts/
+    os.path.expanduser("~/awvs-scripts"),           # EC2: /home/ubuntu/awvs-scripts/
+]:
+    if os.path.exists(os.path.join(_candidate, "generate_report.py")):
+        sys.path.insert(0, _candidate)
+        break
+from generate_report import generate_xlsx_bytes
 
 # ── 페이지 설정 ───────────────────────────────────────────
 st.set_page_config(page_title="AI Cyber Sentinel", layout="wide")
@@ -46,6 +60,23 @@ if scan_list and "error" not in scan_list[0]:
     scan_data = scan_list[selected_idx]
 else:
     scan_data = None
+
+st.sidebar.divider()
+
+# 엑셀 보고서 다운로드
+if scan_data and "error" not in scan_data:
+    try:
+        xlsx_bytes = generate_xlsx_bytes(scan_data)
+        scan_time_str = scan_data.get("scan_time", "").replace(" ", "_").replace(":", "")
+        st.sidebar.download_button(
+            label="📥 엑셀 보고서 다운로드",
+            data=xlsx_bytes,
+            file_name=f"awvs_report_{scan_time_str}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    except Exception as e:
+        st.sidebar.warning(f"보고서 생성 실패: {e}")
 
 st.sidebar.divider()
 st.sidebar.info("""
