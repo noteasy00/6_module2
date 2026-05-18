@@ -36,6 +36,31 @@ def parse_ssh_line(line):
     return options, key_type, key, comment
 
 
+def mask_key(line):
+    """SSH 키 원문을 마스킹하여 증거로 안전하게 표시"""
+    parsed = parse_ssh_line(line)
+    if not parsed:
+        return line[:60] + "..." if len(line) > 60 else line
+
+    options, key_type, key, comment = parsed
+    masked_key = key[:12] + "..." + key[-8:] if len(key) > 20 else key
+    parts = []
+    if options:
+        # command= 옵션은 값도 축약
+        masked_opts = []
+        for opt in options:
+            if opt.startswith("command=") and len(opt) > 30:
+                masked_opts.append("command=\"...\"")
+            else:
+                masked_opts.append(opt)
+        parts.append(",".join(masked_opts))
+    parts.append(key_type)
+    parts.append(masked_key)
+    if comment:
+        parts.append(comment)
+    return " ".join(parts)
+
+
 def check_ssh_backdoor_keys():
 
     file_path = "/root/.ssh/authorized_keys"
@@ -142,19 +167,19 @@ def check_ssh_backdoor_keys():
         # === 판단 로직 ===
         if suspicious_found:
             result["status"] = "취약"
-            result["evidence"] = "\n".join(set(suspicious_found))
+            result["evidence"] = "\n".join(mask_key(k) for k in set(suspicious_found))
             result["reason"] = "SSH 키에서 위험 옵션(command/from/no-forwarding 등) 또는 의심 패턴 탐지"
             result["recommendation"] = "의심 SSH 키 제거 및 authorized_keys 재검증 필요"
 
         elif invalid_lines:
             result["status"] = "취약"
-            result["evidence"] = "\n".join(invalid_lines)
+            result["evidence"] = "\n".join(line[:60] + "..." if len(line) > 60 else line for line in invalid_lines)
             result["reason"] = "SSH 공개키 형식이 올바르지 않은 항목 존재"
             result["recommendation"] = "authorized_keys 파일 정리 및 비정상 키 제거"
 
         elif valid_keys:
             result["status"] = "양호"
-            result["evidence"] = "\n".join(valid_keys)
+            result["evidence"] = f"정상 SSH 공개키 {len(valid_keys)}건 확인 (키 내용 마스킹 처리)"
             result["reason"] = "정상 SSH 공개키만 존재"
             result["recommendation"] = "-"
 
