@@ -90,15 +90,17 @@ def _apply_cell(ws, row, col, value, font=None, fill=None, alignment=None):
 
 
 def _section_header(ws, row, col_start, col_end, title, fill):
+    # 서식을 먼저 적용한 뒤 병합 (openpyxl에서 MergedCell은 스타일 무시됨)
+    for c in range(col_start, col_end + 1):
+        cell = ws.cell(row=row, column=c)
+        cell.fill = fill
+        cell.border = THIN_BORDER
     ws.merge_cells(start_row=row, start_column=col_start, end_row=row, end_column=col_end)
     cell = ws.cell(row=row, column=col_start, value=title)
     cell.font = FONT_SUBTITLE
     cell.fill = fill
     cell.alignment = ALIGN_LEFT
     cell.border = THIN_BORDER
-    for c in range(col_start, col_end + 1):
-        ws.cell(row=row, column=c).fill = fill
-        ws.cell(row=row, column=c).border = THIN_BORDER
 
 
 # ── Sheet 1: 스캔 요약 ──────────────────────────────────
@@ -120,47 +122,49 @@ def _build_summary_sheet(wb, scan_data, results):
     else:
         risk_level = "Low"
 
-    # 컬럼 너비 통일 (A~E 사용)
-    col_widths = {"A": 16, "B": 22, "C": 4, "D": 16, "E": 22}
+    # 컬럼 너비 (A~F)
+    col_widths = {"A": 14, "B": 14, "C": 28, "D": 10, "E": 24, "F": 20}
     for letter, w in col_widths.items():
         ws.column_dimensions[letter].width = w
 
-    # 제목
-    ws.merge_cells("A1:E1")
-    cell = ws["A1"]
-    cell.value = "AWVS 보안 진단 보고서"
-    cell.font = FONT_TITLE
-    cell.alignment = ALIGN_CENTER
-    cell.fill = FILL_DARK_HEADER
-    cell.font = Font(name="Arial", bold=True, size=16, color="FFFFFF")
-    for c in range(1, 6):
-        ws.cell(row=1, column=c).fill = FILL_DARK_HEADER
-        ws.cell(row=1, column=c).border = THIN_BORDER
+    # ── 제목 행 (서식 먼저 → 병합) ──
+    title_font = Font(name="Arial", bold=True, size=16, color="FFFFFF")
+    for c in range(1, 7):
+        cell = ws.cell(row=1, column=c)
+        cell.fill = FILL_DARK_HEADER
+        cell.border = THIN_BORDER
+    ws.merge_cells("A1:F1")
+    ws["A1"].value = "AWVS 보안 진단 보고서"
+    ws["A1"].font = title_font
+    ws["A1"].alignment = ALIGN_CENTER
+    ws["A1"].fill = FILL_DARK_HEADER
     ws.row_dimensions[1].height = 36
 
-    ws.merge_cells("A2:E2")
+    # 부제목
+    for c in range(1, 7):
+        ws.cell(row=2, column=c).border = THIN_BORDER
+    ws.merge_cells("A2:F2")
     ws["A2"].value = f"생성: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 스캔: {scan_data.get('scan_time', '-')}"
     ws["A2"].font = FONT_SMALL
     ws["A2"].alignment = ALIGN_CENTER
 
-    # ── 좌측: 서버 정보 / 우측: 통계 (2열 레이아웃) ──
+    # ── 좌측: 서버 정보 / 우측: 통계 (행 수 맞춤) ──
     row = 4
-    # 좌측 헤더
     _section_header(ws, row, 1, 2, "서버 정보", FILL_LIGHT_GRAY)
-    # 우측 헤더
-    _section_header(ws, row, 4, 5, "진단 결과 통계", FILL_LIGHT_GRAY)
+    _section_header(ws, row, 4, 6, "진단 결과 통계", FILL_LIGHT_GRAY)
 
-    # 좌측 데이터
+    # 좌측 데이터 (4행으로 맞춤)
     info_data = [
         ("호스트명", scan_data.get("server", "-")),
         ("IP 주소", scan_data.get("server_ip", "-")),
         ("점검 항목 수", f"{len(results)}개"),
+        ("분석 엔진", "GPT-4o-mini"),
     ]
     for i, (label, value) in enumerate(info_data, row + 1):
         _apply_cell(ws, i, 1, label, font=FONT_LABEL)
         _apply_cell(ws, i, 2, value)
 
-    # 우측 데이터
+    # 우측 데이터 (4행)
     stat_data = [
         ("종합 위험도", risk_level, Font(name="Arial", bold=True, size=13, color=RISK_COLORS.get(risk_level, "000000")), None),
         ("취약", f"{vuln_count}건", STATUS_FONT_MAP["취약"], FILL_VULN),
@@ -169,49 +173,74 @@ def _build_summary_sheet(wb, scan_data, results):
     ]
     for i, (label, value, font, fill) in enumerate(stat_data, row + 1):
         _apply_cell(ws, i, 4, label, font=FONT_LABEL)
-        _apply_cell(ws, i, 5, value, font=font, fill=fill, alignment=ALIGN_CENTER)
+        # E+F 병합해서 값 표시
+        ws.cell(row=i, column=5).border = THIN_BORDER
+        ws.cell(row=i, column=6).border = THIN_BORDER
+        if fill:
+            ws.cell(row=i, column=5).fill = fill
+            ws.cell(row=i, column=6).fill = fill
+        ws.merge_cells(start_row=i, start_column=5, end_row=i, end_column=6)
+        cell = ws.cell(row=i, column=5, value=value)
+        cell.font = font
+        cell.alignment = ALIGN_CENTER
+        cell.border = THIN_BORDER
+        if fill:
+            cell.fill = fill
 
     # ── 전체 점검 결과 요약 테이블 ──
     table_start = row + len(info_data) + 2
-    _section_header(ws, table_start, 1, 5, "전체 점검 결과", FILL_HEADER_BLUE)
-    ws.cell(row=table_start, column=1).font = Font(name="Arial", bold=True, size=11, color="FFFFFF")
+    # 섹션 헤더 (파란색)
+    header_font_white = Font(name="Arial", bold=True, size=11, color="FFFFFF")
+    for c in range(1, 7):
+        cell = ws.cell(row=table_start, column=c)
+        cell.fill = FILL_HEADER_BLUE
+        cell.border = THIN_BORDER
+    ws.merge_cells(start_row=table_start, start_column=1, end_row=table_start, end_column=6)
+    ws.cell(row=table_start, column=1, value="전체 점검 결과").font = header_font_white
+    ws.cell(row=table_start, column=1).fill = FILL_HEADER_BLUE
+    ws.cell(row=table_start, column=1).alignment = ALIGN_LEFT
 
-    table_headers = ["모듈코드", "항목명", "", "상태", "ATT&CK Technique"]
+    # 테이블 헤더
+    table_headers = ["모듈코드", "카테고리", "항목명", "상태", "ATT&CK Technique", "Tactic"]
     header_row = table_start + 1
-    header_widths_map = {1: "A", 2: "B", 4: "D", 5: "E"}
     for col_idx, header in enumerate(table_headers, 1):
-        if col_idx == 3:
-            continue  # C열은 간격용
         cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = FONT_HEADER
         cell.fill = FILL_HEADER_BLUE
         cell.alignment = ALIGN_CENTER
         cell.border = THIN_BORDER
-    # C열 헤더도 색 채우기
-    ws.cell(row=header_row, column=3).fill = FILL_HEADER_BLUE
-    ws.cell(row=header_row, column=3).border = THIN_BORDER
 
+    # 데이터 행
     for i, r in enumerate(results, header_row + 1):
         status = r.get("status", "")
         ai = r.get("ai_analysis", {})
         technique = ai.get("mitre_technique", "-")
+        tactic = ai.get("mitre_tactic", "-")
 
         _apply_cell(ws, i, 1, r.get("module", ""), alignment=ALIGN_CENTER)
-        # B+C 병합해서 항목명에 더 넓은 공간
-        ws.merge_cells(start_row=i, start_column=2, end_row=i, end_column=3)
-        _apply_cell(ws, i, 2, r.get("title", ""))
-        ws.cell(row=i, column=3).border = THIN_BORDER
+        _apply_cell(ws, i, 2, r.get("category", "-"), alignment=ALIGN_CENTER)
+        _apply_cell(ws, i, 3, r.get("title", ""))
 
         status_cell = _apply_cell(ws, i, 4, status, alignment=ALIGN_CENTER)
         if status in STATUS_FILL_MAP:
             status_cell.fill = STATUS_FILL_MAP[status]
             status_cell.font = STATUS_FONT_MAP[status]
 
-        _apply_cell(ws, i, 5, technique, font=FONT_SMALL)
+        _apply_cell(ws, i, 5, technique, font=FONT_SMALL, alignment=ALIGN_CENTER)
+        _apply_cell(ws, i, 6, tactic, font=FONT_SMALL)
+
+        # 행에 교차 배경색
+        if (i - header_row) % 2 == 0:
+            for c in [1, 2, 3, 5, 6]:
+                existing = ws.cell(row=i, column=c)
+                if not existing.fill or existing.fill.fgColor.rgb == "00000000":
+                    existing.fill = FILL_LIGHT_GRAY
+
+        ws.row_dimensions[i].height = 22
 
     # 인쇄 영역 설정
     last_row = header_row + len(results)
-    ws.print_area = f"A1:E{last_row}"
+    ws.print_area = f"A1:F{last_row}"
 
 
 # ── Sheet 2: 진단 결과 상세 ──────────────────────────────
@@ -247,12 +276,16 @@ def _build_results_sheet(wb, results):
             status_cell.font = STATUS_FONT_MAP[status]
             status_cell.alignment = ALIGN_CENTER
 
-        # 행 높이 자동 조정 (증거 길이 기반)
-        evidence_len = len(r.get("evidence", ""))
-        if evidence_len > 100:
+        # 행 높이 자동 조정 (가장 긴 셀 기준)
+        max_len = max(len(str(v)) for v in values)
+        if max_len > 200:
+            ws.row_dimensions[row_idx].height = 80
+        elif max_len > 100:
             ws.row_dimensions[row_idx].height = 60
-        elif evidence_len > 50:
-            ws.row_dimensions[row_idx].height = 40
+        elif max_len > 50:
+            ws.row_dimensions[row_idx].height = 45
+        else:
+            ws.row_dimensions[row_idx].height = 30
 
     ws.auto_filter.ref = f"A1:H{len(results) + 1}"
     ws.freeze_panes = "A2"
@@ -324,7 +357,7 @@ def _build_countermeasure_sheet(wb, results):
     warn_items = [r for r in results if r["status"] == "주의"]
 
     headers = ["우선순위", "모듈코드", "항목명", "위험 상세", "공격 시나리오", "대응 방안", "ATT&CK Technique"]
-    widths = [10, 12, 22, 42, 42, 42, 32]
+    widths = [8, 10, 20, 45, 45, 50, 30]
     _apply_header_row(ws, 1, headers, FILL_HEADER_RED, widths)
 
     if not vuln_items and not warn_items:
@@ -355,12 +388,26 @@ def _build_countermeasure_sheet(wb, results):
         _apply_cell(ws, current_row, 1, f"P{idx}", font=Font(name="Arial", bold=True, size=11, color="CC0000"), fill=FILL_VULN, alignment=ALIGN_CENTER)
         _apply_cell(ws, current_row, 2, r.get("module", ""), fill=FILL_VULN, alignment=ALIGN_CENTER)
         _apply_cell(ws, current_row, 3, r.get("title", ""), fill=FILL_VULN)
-        _apply_cell(ws, current_row, 4, risk_detail)
-        _apply_cell(ws, current_row, 5, attack_scenario)
-        _apply_cell(ws, current_row, 6, countermeasure)
-        _apply_cell(ws, current_row, 7, ai.get("mitre_technique", "-"), font=FONT_SMALL)
+        _apply_cell(ws, current_row, 4, risk_detail, alignment=ALIGN_WRAP)
+        _apply_cell(ws, current_row, 5, attack_scenario, alignment=ALIGN_WRAP)
+        _apply_cell(ws, current_row, 6, countermeasure, alignment=ALIGN_WRAP)
 
-        ws.row_dimensions[current_row].height = 55
+        # ATT&CK ID + Name 합쳐서 표시
+        mitre_id = ai.get("mitre_technique", "-")
+        mitre_tactic = ai.get("mitre_tactic", "-")
+        mitre_display = f"{mitre_id}\n({mitre_tactic})" if mitre_id != "-" else "-"
+        _apply_cell(ws, current_row, 7, mitre_display, font=FONT_SMALL, alignment=ALIGN_WRAP)
+
+        # 행 높이: 가장 긴 텍스트 기준 동적 계산
+        max_text = max(len(str(risk_detail)), len(str(attack_scenario)), len(str(countermeasure)))
+        if max_text > 300:
+            ws.row_dimensions[current_row].height = 120
+        elif max_text > 200:
+            ws.row_dimensions[current_row].height = 100
+        elif max_text > 100:
+            ws.row_dimensions[current_row].height = 80
+        else:
+            ws.row_dimensions[current_row].height = 55
         current_row += 1
 
     # 주의 항목 구분선 + 데이터
@@ -388,12 +435,22 @@ def _build_countermeasure_sheet(wb, results):
             _apply_cell(ws, current_row, 1, f"W{idx}", font=Font(name="Arial", bold=True, size=10, color="856404"), fill=FILL_WARN, alignment=ALIGN_CENTER)
             _apply_cell(ws, current_row, 2, r.get("module", ""), fill=FILL_WARN, alignment=ALIGN_CENTER)
             _apply_cell(ws, current_row, 3, r.get("title", ""), fill=FILL_WARN)
-            _apply_cell(ws, current_row, 4, risk_detail)
-            _apply_cell(ws, current_row, 5, attack_scenario)
-            _apply_cell(ws, current_row, 6, countermeasure)
-            _apply_cell(ws, current_row, 7, ai.get("mitre_technique", "-"), font=FONT_SMALL)
+            _apply_cell(ws, current_row, 4, risk_detail, alignment=ALIGN_WRAP)
+            _apply_cell(ws, current_row, 5, attack_scenario, alignment=ALIGN_WRAP)
+            _apply_cell(ws, current_row, 6, countermeasure, alignment=ALIGN_WRAP)
 
-            ws.row_dimensions[current_row].height = 45
+            mitre_id = ai.get("mitre_technique", "-")
+            mitre_tactic = ai.get("mitre_tactic", "-")
+            mitre_display = f"{mitre_id}\n({mitre_tactic})" if mitre_id != "-" else "-"
+            _apply_cell(ws, current_row, 7, mitre_display, font=FONT_SMALL, alignment=ALIGN_WRAP)
+
+            max_text = max(len(str(risk_detail)), len(str(countermeasure)))
+            if max_text > 200:
+                ws.row_dimensions[current_row].height = 80
+            elif max_text > 100:
+                ws.row_dimensions[current_row].height = 60
+            else:
+                ws.row_dimensions[current_row].height = 45
             current_row += 1
 
     ws.auto_filter.ref = f"A1:G{current_row - 1}"
